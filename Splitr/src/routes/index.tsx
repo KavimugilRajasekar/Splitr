@@ -440,7 +440,7 @@ function Index() {
               </SheetContent>
             </Sheet>
             <div className="min-w-0">
-              <h1 className="truncate text-2xl font-bold tracking-tight text-foreground">Splitr</h1>
+              <h1 className="truncate text-5xl font-bold tracking-tight text-foreground">Splitr</h1>
               <p className="hidden text-sm text-muted-foreground sm:block">Optimized expense settlement with graph reduction</p>
             </div>
           </div>
