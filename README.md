@@ -177,12 +177,6 @@ For detailed case-by-case examples covering 15 scenarios (equal split, partial g
 
 ---
 
-## 📸 App Icon
-
-<img src="splitr_warpper/assets/icons/splitr_no_bg.png" alt="Splitr Icon" width="120" />
-
----
-
 ## 📄 License
 
 This project is private and not published to pub.dev or npm registries.
