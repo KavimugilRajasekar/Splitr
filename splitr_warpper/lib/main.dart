@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'update_service.dart';
+import 'update_dialog.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -9,12 +11,6 @@ void main() async {
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
   ]);
-
-  // Hide system overlays if desired
-  SystemChrome.setEnabledSystemUIMode(
-    SystemUiMode.edgeToEdge,
-  );
-
   runApp(const SplitrApp());
 }
 
@@ -51,6 +47,19 @@ class _SplitrWebViewState extends State<SplitrWebView> {
       ..loadRequest(
         Uri.parse('https://splitr-umber.vercel.app'),
       );
+
+    // Trigger update check after the first frame so the WebView loads
+    // immediately without any delay. The dialog only appears if a newer
+    // version is found on GitHub.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkForUpdate());
+  }
+
+  Future<void> _checkForUpdate() async {
+    final info = await UpdateService.checkForUpdate();
+    // Guard: ensure widget is still in tree before showing dialog
+    if (info != null && mounted) {
+      await showUpdateDialog(context, info);
+    }
   }
 
   @override
@@ -58,8 +67,8 @@ class _SplitrWebViewState extends State<SplitrWebView> {
     return PopScope(
       canPop: false,
       child: Scaffold(
-        backgroundColor: Colors.black,
-        body: SizedBox.expand(
+        backgroundColor: Colors.white,
+        body: SafeArea(
           child: WebViewWidget(
             controller: controller,
           ),
