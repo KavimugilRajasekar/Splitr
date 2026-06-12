@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, useEffect } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -71,6 +71,34 @@ function Index() {
 
   // import ref
   const importRef = useRef<HTMLInputElement>(null);
+
+  // ---- Android WebView bridge ----
+  // Detect if running inside the Flutter WebView (JS channels are injected)
+  const isAndroidWebView =
+    typeof window !== "undefined" &&
+    typeof (window as unknown as Record<string, unknown>).SplitrExport === "object";
+
+  // Register the import callback so Flutter can send file content back
+  useEffect(() => {
+    (window as unknown as Record<string, unknown>).__splitrImportCallback = (jsonStr: string) => {
+      try {
+        const data = JSON.parse(jsonStr);
+        if (!Array.isArray(data.people)) throw new Error("Invalid format: missing people");
+        setPeople(data.people ?? []);
+        setExpenses(data.expenses ?? []);
+        setManualEdges(data.manualEdges ?? []);
+        setSettlements(data.settlements ?? []);
+        setCalculated(false);
+        toast.success("Imported successfully — ready to re-edit");
+      } catch (err) {
+        toast.error("Failed to import: " + (err instanceof Error ? err.message : "Invalid file"));
+      }
+    };
+    return () => {
+      delete (window as unknown as Record<string, unknown>).__splitrImportCallback;
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ---- live computation ----
   const live = useMemo(
@@ -196,7 +224,14 @@ function Index() {
 
   const exportJSON = () => {
     const data = { people, expenses, manualEdges, settlements, result: live };
-    download("settlement.json", "application/json", JSON.stringify(data, null, 2));
+    const jsonStr = JSON.stringify(data, null, 2);
+    if (isAndroidWebView) {
+      // Send to Flutter which saves it to Downloads
+      (window as unknown as Record<string, { postMessage: (s: string) => void }>)
+        .SplitrExport.postMessage(jsonStr);
+    } else {
+      download("settlement.json", "application/json", jsonStr);
+    }
   };
 
   const importJSON = (file: File) => {
@@ -216,6 +251,16 @@ function Index() {
       }
     };
     reader.readAsText(file);
+  };
+
+  const triggerImport = () => {
+    if (isAndroidWebView) {
+      // Ask Flutter to open native file picker; result comes back via __splitrImportCallback
+      (window as unknown as Record<string, { postMessage: (s: string) => void }>)
+        .SplitrImport.postMessage("pick");
+    } else {
+      importRef.current?.click();
+    }
   };
 
   const calculate = () => {
@@ -460,7 +505,7 @@ function Index() {
           </div>
           <div className="flex flex-wrap gap-2">
             <Button onClick={exportJSON} variant="outline" size="sm" className="gap-2"><FileDown className="size-4" /> Export</Button>
-            <Button onClick={() => importRef.current?.click()} variant="outline" size="sm" className="gap-2">
+            <Button onClick={() => triggerImport()} variant="outline" size="sm" className="gap-2">
               <FileUp className="size-4" /> Import
             </Button>
             <input
