@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,7 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import {
   X, Plus, Calculator, Users, Receipt, ArrowRightLeft,
-  RotateCcw, Download, CheckCircle2, Menu, MessageSquare,
+  RotateCcw, FileDown, FileUp, CheckCircle2, Menu, MessageSquare,
 } from "lucide-react";
 
 import { DebtGraph } from "@/components/DebtGraph";
@@ -69,25 +69,26 @@ function Index() {
   // mobile drawer
   const [drawerOpen, setDrawerOpen] = useState(false);
 
+  // import ref
+  const importRef = useRef<HTMLInputElement>(null);
+
   // ---- live computation ----
   const live = useMemo(
     () => calculateAll(people, expenses, manualEdges, settlements),
     [people, expenses, manualEdges, settlements],
   );
 
-  // Cumulative branching snapshots — one per expense added
+  // Separate snapshots — each expense's own debt graph (not cumulative)
   const snapshots = useMemo(() => {
-    const out: { label: string; note?: string; edges: Edge[] }[] = [];
-    const acc: Edge[] = [];
-    expenses.forEach((e, i) => {
-      acc.push(...expenseToEdges(e));
-      out.push({
-        label: `Graph ${i + 1}`,
-        note: e.note,
-        edges: [...acc],
-      });
-    });
-    return out;
+    return expenses.map((e, i) => ({
+      id: e.id,
+      label: `Expense ${i + 1}`,
+      note: e.note,
+      total: Object.values(e.payers).reduce((s, v) => s + v, 0),
+      payerStr: Object.entries(e.payers).map(([p, v]) => `${p}: ₹${v}`).join(", "),
+      benefStr: Object.keys(e.shares).join(", "),
+      edges: expenseToEdges(e),
+    }));
   }, [expenses]);
 
   // ---- handlers ----
@@ -198,10 +199,23 @@ function Index() {
     download("settlement.json", "application/json", JSON.stringify(data, null, 2));
   };
 
-  const exportCSV = () => {
-    const rows = [["from", "to", "amount"]];
-    for (const e of live.settled) rows.push([e.from, e.to, String(e.amount)]);
-    download("settlement.csv", "text/csv", rows.map(r => r.join(",")).join("\n"));
+  const importJSON = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = JSON.parse(ev.target?.result as string);
+        if (!Array.isArray(data.people)) throw new Error("Invalid format: missing people");
+        setPeople(data.people ?? []);
+        setExpenses(data.expenses ?? []);
+        setManualEdges(data.manualEdges ?? []);
+        setSettlements(data.settlements ?? []);
+        setCalculated(false);
+        toast.success("Imported successfully — ready to re-edit");
+      } catch (err) {
+        toast.error("Failed to import: " + (err instanceof Error ? err.message : "Invalid JSON file"));
+      }
+    };
+    reader.readAsText(file);
   };
 
   const calculate = () => {
@@ -445,8 +459,21 @@ function Index() {
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button onClick={exportJSON} variant="outline" size="sm" className="gap-2"><Download className="size-4" /> JSON</Button>
-            <Button onClick={exportCSV} variant="outline" size="sm" className="gap-2"><Download className="size-4" /> CSV</Button>
+            <Button onClick={exportJSON} variant="outline" size="sm" className="gap-2"><FileDown className="size-4" /> Export</Button>
+            <Button onClick={() => importRef.current?.click()} variant="outline" size="sm" className="gap-2">
+              <FileUp className="size-4" /> Import
+            </Button>
+            <input
+              ref={importRef}
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={e => {
+                const file = e.target.files?.[0];
+                if (file) importJSON(file);
+                e.target.value = "";
+              }}
+            />
             <Button onClick={resetAll} variant="outline" size="sm" className="gap-2"><RotateCcw className="size-4" /> Reset</Button>
             <Button onClick={calculate} size="sm" className="gap-2"><Calculator className="size-4" /> Calculate</Button>
           </div>
@@ -483,22 +510,42 @@ function Index() {
                 <TabsContent value="history" className="mt-3">
                   {snapshots.length === 0 ? (
                     <div className="flex h-40 items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground">
-                      No expenses yet — added expenses will branch here as Graph 1, Graph 2, …
+                      No expenses yet — each expense will appear here with its own debt graph.
                     </div>
                   ) : (
                     <div className="grid gap-4 sm:grid-cols-2">
-                      {snapshots.map((s, i) => (
-                        <div key={i} className="space-y-2 rounded-lg border border-border bg-card/40 p-2">
-                          <div className="flex items-center justify-between gap-2 px-1">
-                            <span className="text-sm font-semibold">{s.label}</span>
-                            <span className="truncate text-xs text-muted-foreground">{s.note ?? "—"}</span>
+                      {snapshots.map((s) => (
+                        <div key={s.id} className="space-y-2 rounded-lg border border-border bg-card/40 p-2">
+                          <div className="flex items-start justify-between gap-2 px-1">
+                            <div className="min-w-0 space-y-0.5">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-sm font-semibold">{s.label}</span>
+                                <span className="text-sm font-semibold text-muted-foreground">· ₹{s.total}</span>
+                              </div>
+                              <p className="truncate text-xs text-muted-foreground">
+                                <span className="font-medium">Paid:</span> {s.payerStr}
+                              </p>
+                              <p className="truncate text-xs text-muted-foreground">
+                                <span className="font-medium">Split:</span> {s.benefStr}
+                              </p>
+                              {s.note && (
+                                <p className="truncate text-xs italic text-muted-foreground">"{s.note}"</p>
+                              )}
+                            </div>
+                            <button
+                              onClick={() => { removeExpense(s.id); toast.success(`Deleted ${s.label}`); }}
+                              className="shrink-0 rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                              aria-label={`Delete ${s.label}`}
+                            >
+                              <X className="size-4" />
+                            </button>
                           </div>
                           <DebtGraph people={people} edges={s.edges} />
                         </div>
                       ))}
                     </div>
                   )}
-                  <p className="mt-2 text-xs text-muted-foreground">Each branch is the cumulative debt graph after that expense was added.</p>
+                  <p className="mt-2 text-xs text-muted-foreground">Each card shows the debt graph for that individual expense only.</p>
                 </TabsContent>
               </Tabs>
             </CardContent>
